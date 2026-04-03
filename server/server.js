@@ -10,12 +10,24 @@ const store = require("./store");
 const { signToken, verifyToken, hashPassword, checkPassword, authMiddleware } = require("./auth");
 
 const app = express();
-app.use(cors());
+
+// ── CORS ─────────────────────────────────────────────────────────────────────
+const ALLOWED_ORIGINS = [
+  "http://localhost:3000",
+  "https://collab-code-production-a926.up.railway.app",
+  // Vercel URL will be added here after deployment
+];
+
+app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express.json());
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
+  cors: {
+    origin: ALLOWED_ORIGINS,
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
 });
 
 const activeUsers = new Map();

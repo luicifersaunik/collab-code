@@ -15,7 +15,7 @@ const app = express();
 const ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "https://collab-code-production-a926.up.railway.app",
-  // Vercel URL will be added here after deployment
+  "https://collab-code-s8vw.vercel.app"
 ];
 
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));

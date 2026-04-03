@@ -5,6 +5,8 @@ import Toolbar from "./Toolbar";
 import Sidebar from "./Sidebar";
 import OutputPanel from "./OutputPanel";
 import styles from "./EditorPage.module.css";
+import { apiUrl } from "../api";
+
 
 const SUPPORTED_LANGUAGES = [
   { id: "javascript", label: "JavaScript" },
@@ -207,7 +209,7 @@ export default function EditorPage({ roomId, username, token, onLeave, onLogout 
     setIsRunning(true);
     setExecResult(null);
     try {
-      const res = await fetch("/api/execute", {
+      const res = await fetch(apiUrl("/api/execute"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, language }),

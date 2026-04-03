@@ -1,5 +1,6 @@
 import { useState } from "react";
 import styles from "./Landing.module.css";
+import { apiUrl } from "../api";
 
 export default function Landing({ prefilledRoom = "", username, onJoin, onLogout }) {
   const [tab, setTab] = useState(prefilledRoom ? "join" : "create");
@@ -12,7 +13,7 @@ export default function Landing({ prefilledRoom = "", username, onJoin, onLogout
     setIsLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/room/create", { method: "POST" });
+     const res = await fetch(apiUrl("/api/room/create"), { method: "POST" });
       const { roomId: newRoomId } = await res.json();
       onJoin({ roomId: newRoomId });
     } catch {
@@ -28,7 +29,7 @@ export default function Landing({ prefilledRoom = "", username, onJoin, onLogout
     setIsLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/room/${roomId.trim().toUpperCase()}`);
+      const res = await fetch(apiUrl(`/api/room/${roomId.trim().toUpperCase()}`));
       const { exists } = await res.json();
       if (!exists) { setError("Room not found. Check the code and try again."); setIsLoading(false); return; }
       onJoin({ roomId: roomId.trim().toUpperCase() });

@@ -1,14 +1,13 @@
 /**
- * store.js — Persistent store abstraction
+ * store.js — Persistent store abstraction (Redis or in-memory)
  *
- * Uses Redis when REDIS_URL env var is set.
- * Falls back silently to in-memory Maps (default / dev).
+ * Room schema:
+ *   files: JSON array of { id, name, language, content }
+ *   activeFileId: string
+ *   chatHistory: JSON array
  *
- * Room schema (Redis hash key: room:{roomId}):
- *   code, language, createdAt, chatHistory (JSON array)
- *
- * User schema (Redis hash key: user:{username}):
- *   username, passwordHash, createdAt
+ * User schema:
+ *   username, passwordHash, avatar (GitHub), createdAt
  */
 
 const Redis = require("ioredis");
@@ -19,44 +18,43 @@ if (process.env.REDIS_URL) {
   try {
     redis = new Redis(process.env.REDIS_URL, { lazyConnect: true });
     redis.on("connect", () => console.log("✅ Redis connected"));
-    redis.on("error", (err) => {
-      console.warn("⚠️  Redis error — falling back to memory:", err.message);
-      redis = null;
-    });
+    redis.on("error", (err) => { console.warn("⚠️  Redis error:", err.message); redis = null; });
     redis.connect().catch(() => { redis = null; });
-  } catch {
-    redis = null;
-  }
+  } catch { redis = null; }
 } else {
-  console.log("ℹ️  No REDIS_URL set — using in-memory store (rooms won't persist across restarts)");
+  console.log("ℹ️  No REDIS_URL set — using in-memory store");
 }
 
-// ─── In-memory fallback ───────────────────────────────────────────────────────
-const memRooms = new Map();  // roomId → { code, language, createdAt, chatHistory }
-const memUsers = new Map();  // username → { username, passwordHash, createdAt }
+const memRooms = new Map();
+const memUsers = new Map();
+const ROOM_TTL = 60 * 60 * 24 * 7;
 
-const ROOM_TTL = 60 * 60 * 24 * 7; // 7 days in seconds
+const DEFAULT_FILE = (id) => ({
+  id: id || "file-1",
+  name: "main.js",
+  language: "javascript",
+  content: `// Welcome to CollabCode!\n// Start typing to collaborate in real-time.\n\nfunction greet(name) {\n  return \`Hello, \${name}! Let's build something great.\`;\n}\n\nconsole.log(greet("World"));\n`,
+});
 
-// ─── Room operations ─────────────────────────────────────────────────────────
+// ── Room operations ──────────────────────────────────────────────────────────
 
 async function roomExists(roomId) {
   if (redis) return !!(await redis.exists(`room:${roomId}`));
   return memRooms.has(roomId);
 }
 
-async function createRoom(roomId, { code, language }) {
+async function createRoom(roomId) {
+  const defaultFile = DEFAULT_FILE("file-1");
   const data = {
-    code,
-    language,
-    createdAt: Date.now(),
+    files: [defaultFile],
+    activeFileId: defaultFile.id,
     chatHistory: [],
   };
   if (redis) {
     await redis.hset(`room:${roomId}`,
-      "code", data.code,
-      "language", data.language,
-      "createdAt", data.createdAt,
-      "chatHistory", JSON.stringify(data.chatHistory)
+      "files", JSON.stringify(data.files),
+      "activeFileId", data.activeFileId,
+      "chatHistory", JSON.stringify([])
     );
     await redis.expire(`room:${roomId}`, ROOM_TTL);
   } else {
@@ -68,33 +66,70 @@ async function createRoom(roomId, { code, language }) {
 async function getRoom(roomId) {
   if (redis) {
     const raw = await redis.hgetall(`room:${roomId}`);
-    if (!raw || !raw.code) return null;
+    if (!raw || !raw.files) return null;
     return {
-      code: raw.code,
-      language: raw.language,
-      createdAt: Number(raw.createdAt),
+      files: JSON.parse(raw.files),
+      activeFileId: raw.activeFileId,
       chatHistory: JSON.parse(raw.chatHistory || "[]"),
     };
   }
   return memRooms.get(roomId) || null;
 }
 
-async function updateRoomCode(roomId, code) {
+async function updateFileContent(roomId, fileId, content) {
   if (redis) {
-    await redis.hset(`room:${roomId}`, "code", code);
-    await redis.expire(`room:${roomId}`, ROOM_TTL); // refresh TTL on activity
+    const raw = await redis.hget(`room:${roomId}`, "files");
+    const files = JSON.parse(raw || "[]");
+    const f = files.find(f => f.id === fileId);
+    if (f) { f.content = content; await redis.hset(`room:${roomId}`, "files", JSON.stringify(files)); }
+    await redis.expire(`room:${roomId}`, ROOM_TTL);
   } else {
     const room = memRooms.get(roomId);
-    if (room) room.code = code;
+    if (room) { const f = room.files.find(f => f.id === fileId); if (f) f.content = content; }
   }
 }
 
-async function updateRoomLanguage(roomId, language) {
+async function createFile(roomId, file) {
   if (redis) {
-    await redis.hset(`room:${roomId}`, "language", language);
+    const raw = await redis.hget(`room:${roomId}`, "files");
+    const files = JSON.parse(raw || "[]");
+    files.push(file);
+    await redis.hset(`room:${roomId}`, "files", JSON.stringify(files));
   } else {
     const room = memRooms.get(roomId);
-    if (room) room.language = language;
+    if (room) room.files.push(file);
+  }
+}
+
+async function renameFile(roomId, fileId, name) {
+  if (redis) {
+    const raw = await redis.hget(`room:${roomId}`, "files");
+    const files = JSON.parse(raw || "[]");
+    const f = files.find(f => f.id === fileId);
+    if (f) { f.name = name; await redis.hset(`room:${roomId}`, "files", JSON.stringify(files)); }
+  } else {
+    const room = memRooms.get(roomId);
+    if (room) { const f = room.files.find(f => f.id === fileId); if (f) f.name = name; }
+  }
+}
+
+async function deleteFile(roomId, fileId) {
+  if (redis) {
+    const raw = await redis.hget(`room:${roomId}`, "files");
+    const files = JSON.parse(raw || "[]").filter(f => f.id !== fileId);
+    await redis.hset(`room:${roomId}`, "files", JSON.stringify(files));
+  } else {
+    const room = memRooms.get(roomId);
+    if (room) room.files = room.files.filter(f => f.id !== fileId);
+  }
+}
+
+async function setActiveFile(roomId, fileId) {
+  if (redis) {
+    await redis.hset(`room:${roomId}`, "activeFileId", fileId);
+  } else {
+    const room = memRooms.get(roomId);
+    if (room) room.activeFileId = fileId;
   }
 }
 
@@ -103,7 +138,6 @@ async function appendChatMessage(roomId, message) {
     const raw = await redis.hget(`room:${roomId}`, "chatHistory");
     const history = JSON.parse(raw || "[]");
     history.push(message);
-    // Keep last 200 messages
     const trimmed = history.slice(-200);
     await redis.hset(`room:${roomId}`, "chatHistory", JSON.stringify(trimmed));
     return trimmed;
@@ -121,17 +155,17 @@ async function deleteRoom(roomId) {
   else memRooms.delete(roomId);
 }
 
-// ─── User operations ─────────────────────────────────────────────────────────
+// ── User operations ──────────────────────────────────────────────────────────
 
 async function userExists(username) {
   if (redis) return !!(await redis.exists(`user:${username}`));
   return memUsers.has(username);
 }
 
-async function createUser(username, passwordHash) {
-  const data = { username, passwordHash, createdAt: Date.now() };
+async function createUser(username, passwordHash, avatar = "") {
+  const data = { username, passwordHash, avatar, createdAt: Date.now() };
   if (redis) {
-    await redis.hset(`user:${username}`, "username", username, "passwordHash", passwordHash, "createdAt", data.createdAt);
+    await redis.hset(`user:${username}`, "username", username, "passwordHash", passwordHash || "", "avatar", avatar, "createdAt", data.createdAt);
   } else {
     memUsers.set(username, data);
   }
@@ -148,7 +182,9 @@ async function getUser(username) {
 }
 
 module.exports = {
-  roomExists, createRoom, getRoom, updateRoomCode, updateRoomLanguage,
+  roomExists, createRoom, getRoom,
+  updateFileContent, createFile, renameFile, deleteFile, setActiveFile,
   appendChatMessage, deleteRoom,
   userExists, createUser, getUser,
+  DEFAULT_FILE,
 };

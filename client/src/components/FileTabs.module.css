@@ -1,0 +1,113 @@
+.container {
+  display: flex;
+  align-items: center;
+  background: #1e1e1e;
+  border-bottom: 1px solid #2d2d2d;
+  overflow-x: auto;
+  flex-shrink: 0;
+  scrollbar-width: none;
+}
+.container::-webkit-scrollbar { display: none; }
+
+.tabs {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  height: 35px;
+  min-width: 100px;
+  max-width: 160px;
+  border-right: 1px solid #2d2d2d;
+  cursor: pointer;
+  background: #2d2d2d;
+  color: #8a8a8a;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  transition: all 0.15s;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.tab:hover { background: #383838; color: #ccc; }
+
+.tabActive {
+  background: #1e1e1e;
+  color: #fff;
+  border-bottom: 2px solid var(--accent);
+}
+
+.tabIcon {
+  font-size: 9px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-radius: 3px;
+  padding: 1px 4px;
+  flex-shrink: 0;
+  letter-spacing: 0;
+}
+
+.tabName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 3px;
+  border-radius: 3px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  opacity: 0;
+}
+
+.tab:hover .closeBtn { opacity: 1; }
+.closeBtn:hover { background: rgba(255,71,87,0.2); color: var(--red); }
+
+.renameInput {
+  flex: 1;
+  background: #0a0e17;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 6px;
+  outline: none;
+  min-width: 0;
+  width: 100%;
+}
+
+.newFileBtn {
+  width: 35px;
+  height: 35px;
+  background: none;
+  border: none;
+  border-left: 1px solid #2d2d2d;
+  color: #666;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.newFileBtn:hover { color: var(--accent); background: rgba(0,212,255,0.05); }

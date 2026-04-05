@@ -10,11 +10,7 @@ function signToken(payload) {
 }
 
 function verifyToken(token) {
-  try {
-    return jwt.verify(token, JWT_SECRET);
-  } catch {
-    return null;
-  }
+  try { return jwt.verify(token, JWT_SECRET); } catch { return null; }
 }
 
 async function hashPassword(plain) {
@@ -25,12 +21,10 @@ async function checkPassword(plain, hash) {
   return bcrypt.compare(plain, hash);
 }
 
-// Express middleware — attaches req.user if valid Bearer token present
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
-  if (!header || !header.startsWith("Bearer ")) {
+  if (!header || !header.startsWith("Bearer "))
     return res.status(401).json({ error: "Missing or invalid Authorization header" });
-  }
   const token = header.slice(7);
   const payload = verifyToken(token);
   if (!payload) return res.status(401).json({ error: "Invalid or expired token" });

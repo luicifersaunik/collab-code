@@ -4,34 +4,53 @@ const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
 const axios = require("axios");
+const session = require("express-session");
+const passport = require("passport");
+const GitHubStrategy = require("passport-github2").Strategy;
 const { v4: uuidv4 } = require("uuid");
+const Y = require("yjs");
 
 const store = require("./store");
 const { signToken, verifyToken, hashPassword, checkPassword, authMiddleware } = require("./auth");
 
 const app = express();
 
-// ── CORS ─────────────────────────────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "https://collab-code-production-a926.up.railway.app",
-  "https://collab-code-s8vw.vercel.app"
-];
+  "https://collab-code-s8vw.vercel.app",
+  process.env.FRONTEND_URL,
+].filter(Boolean);
 
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express.json());
+app.use(session({
+  secret: process.env.SESSION_SECRET || "collabcode-session-secret",
+  resave: false,
+  saveUninitialized: false,
+  cookie: { secure: process.env.NODE_ENV === "production", maxAge: 24 * 60 * 60 * 1000 },
+}));
+app.use(passport.initialize());
+app.use(passport.session());
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: ALLOWED_ORIGINS,
-    methods: ["GET", "POST"],
-    credentials: true,
-  },
+  cors: { origin: ALLOWED_ORIGINS, methods: ["GET", "POST"], credentials: true },
 });
 
-const activeUsers = new Map();
-const roomSockets = new Map();
+// ── In-memory Yjs docs per room+file ────────────────────────────────────────
+// yjsDocs[roomId][fileId] = Y.Doc
+const yjsDocs = {};
+
+function getYDoc(roomId, fileId) {
+  if (!yjsDocs[roomId]) yjsDocs[roomId] = {};
+  if (!yjsDocs[roomId][fileId]) yjsDocs[roomId][fileId] = new Y.Doc();
+  return yjsDocs[roomId][fileId];
+}
+
+// ── Active users ─────────────────────────────────────────────────────────────
+const activeUsers = new Map();   // socketId → { id, name, color, avatar, roomId, activeFileId }
+const roomSockets = new Map();   // roomId → Set<socketId>
 
 const USER_COLORS = [
   "#00d4ff","#ff6b6b","#ffd93d","#6bcb77",
@@ -39,15 +58,58 @@ const USER_COLORS = [
   "#06ffa5","#ff6b35",
 ];
 
-const DEFAULT_CODE = `// Welcome to CollabCode!\n// Start typing to collaborate in real-time.\n\nfunction greet(name) {\n  return \`Hello, \${name}! Let's build something great.\`;\n}\n\nconsole.log(greet("World"));\n`;
-
 const JUDGE0_LANG_MAP = {
   javascript: 63, typescript: 74, python: 71, java: 62,
   cpp: 54, c: 50, csharp: 51, rust: 73, go: 60,
   shell: 46, ruby: 72, php: 68, swift: 83, kotlin: 78,
 };
 
-// ── AUTH ROUTES ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+//  GITHUB OAUTH
+// ═══════════════════════════════════════════════════════════════════
+
+passport.serializeUser((user, done) => done(null, user));
+passport.deserializeUser((user, done) => done(null, user));
+
+if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
+  passport.use(new GitHubStrategy({
+    clientID: process.env.GITHUB_CLIENT_ID,
+    clientSecret: process.env.GITHUB_CLIENT_SECRET,
+    callbackURL: `${process.env.BACKEND_URL || "http://localhost:3001"}/api/auth/github/callback`,
+  }, async (accessToken, refreshToken, profile, done) => {
+    try {
+      const username = profile.username;
+      const avatar = profile.photos?.[0]?.value || "";
+      const exists = await store.userExists(username);
+      if (!exists) await store.createUser(username, "", avatar);
+      else {
+        // Update avatar
+        const user = await store.getUser(username);
+        if (user && !user.avatar) await store.createUser(username, user.passwordHash || "", avatar);
+      }
+      done(null, { username, avatar });
+    } catch (err) { done(err); }
+  }));
+
+  app.get("/api/auth/github",
+    passport.authenticate("github", { scope: ["user:email"] })
+  );
+
+  app.get("/api/auth/github/callback",
+    passport.authenticate("github", { session: false, failureRedirect: `${process.env.FRONTEND_URL || "http://localhost:3000"}/auth?error=github` }),
+    (req, res) => {
+      const token = signToken({ username: req.user.username, avatar: req.user.avatar });
+      const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+      res.redirect(`${frontendUrl}/auth/callback?token=${token}&username=${req.user.username}&avatar=${encodeURIComponent(req.user.avatar || "")}`);
+    }
+  );
+} else {
+  console.log("ℹ️  GitHub OAuth not configured (GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET missing)");
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  AUTH ROUTES
+// ═══════════════════════════════════════════════════════════════════
 
 app.post("/api/auth/register", async (req, res) => {
   try {
@@ -55,16 +117,11 @@ app.post("/api/auth/register", async (req, res) => {
     if (!username || !password) return res.status(400).json({ error: "Username and password required" });
     if (username.length < 2 || username.length > 20) return res.status(400).json({ error: "Username must be 2–20 characters" });
     if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
-    const exists = await store.userExists(username);
-    if (exists) return res.status(409).json({ error: "Username already taken" });
+    if (await store.userExists(username)) return res.status(409).json({ error: "Username already taken" });
     const passwordHash = await hashPassword(password);
     await store.createUser(username, passwordHash);
-    const token = signToken({ username });
-    res.json({ token, username });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+    res.json({ token: signToken({ username }), username, avatar: "" });
+  } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 app.post("/api/auth/login", async (req, res) => {
@@ -73,39 +130,39 @@ app.post("/api/auth/login", async (req, res) => {
     if (!username || !password) return res.status(400).json({ error: "Username and password required" });
     const user = await store.getUser(username);
     if (!user) return res.status(401).json({ error: "Invalid username or password" });
+    if (!user.passwordHash) return res.status(401).json({ error: "This account uses GitHub login" });
     const valid = await checkPassword(password, user.passwordHash);
     if (!valid) return res.status(401).json({ error: "Invalid username or password" });
-    const token = signToken({ username });
-    res.json({ token, username });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+    res.json({ token: signToken({ username, avatar: user.avatar || "" }), username, avatar: user.avatar || "" });
+  } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
 });
 
 app.get("/api/auth/me", authMiddleware, (req, res) => {
-  res.json({ username: req.user.username });
+  res.json({ username: req.user.username, avatar: req.user.avatar || "" });
 });
 
-// ── ROOM ROUTES ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+//  ROOM ROUTES
+// ═══════════════════════════════════════════════════════════════════
 
 app.get("/api/room/:roomId", async (req, res) => {
-  const exists = await store.roomExists(req.params.roomId);
-  res.json({ exists });
+  res.json({ exists: await store.roomExists(req.params.roomId) });
 });
 
 app.post("/api/room/create", async (req, res) => {
   const roomId = uuidv4().slice(0, 8).toUpperCase();
-  await store.createRoom(roomId, { code: DEFAULT_CODE, language: "javascript" });
+  await store.createRoom(roomId);
   res.json({ roomId });
 });
 
-// ── CODE EXECUTION ───────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+//  CODE EXECUTION (with stdin)
+// ═══════════════════════════════════════════════════════════════════
 
 const JUDGE0_BASE = process.env.JUDGE0_URL || "https://ce.judge0.com";
 
 app.post("/api/execute", async (req, res) => {
-  const { code, language } = req.body;
+  const { code, language, stdin = "" } = req.body;  // ← stdin support
   const langId = JUDGE0_LANG_MAP[language];
   if (!langId) return res.status(400).json({ error: `Language '${language}' not supported for execution.` });
 
@@ -116,7 +173,7 @@ app.post("/api/execute", async (req, res) => {
     };
     const submitRes = await axios.post(
       `${JUDGE0_BASE}/submissions?base64_encoded=false&wait=false`,
-      { source_code: code, language_id: langId, stdin: "" },
+      { source_code: code, language_id: langId, stdin },   // ← pass stdin
       { headers, timeout: 10000 }
     );
     const { token } = submitRes.data;
@@ -144,17 +201,19 @@ app.post("/api/execute", async (req, res) => {
     });
   } catch (err) {
     console.error("Judge0 error:", err.message);
-    res.status(502).json({ error: "Code execution service unavailable. See README for Judge0 setup." });
+    res.status(502).json({ error: "Code execution service unavailable." });
   }
 });
 
-// ── SOCKET.IO ────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+//  SOCKET.IO — with Yjs sync + file tabs
+// ═══════════════════════════════════════════════════════════════════
 
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
   if (token) {
     const payload = verifyToken(token);
-    if (payload) socket.username = payload.username;
+    if (payload) { socket.username = payload.username; socket.avatar = payload.avatar || ""; }
   }
   next();
 });
@@ -162,11 +221,12 @@ io.use((socket, next) => {
 io.on("connection", (socket) => {
   console.log(`[+] ${socket.id}`);
 
+  // ── JOIN ROOM ────────────────────────────────────────────────────
   socket.on("join-room", async ({ roomId, username }) => {
     const name = socket.username || username || `Guest${Math.floor(Math.random() * 9000 + 1000)}`;
+    const avatar = socket.avatar || "";
 
-    const exists = await store.roomExists(roomId);
-    if (!exists) await store.createRoom(roomId, { code: DEFAULT_CODE, language: "javascript" });
+    if (!(await store.roomExists(roomId))) await store.createRoom(roomId);
     const room = await store.getRoom(roomId);
 
     socket.join(roomId);
@@ -175,68 +235,116 @@ io.on("connection", (socket) => {
     socket.roomId = roomId;
 
     const idx = (roomSockets.get(roomId).size - 1) % USER_COLORS.length;
-    const user = { id: socket.id, name, color: USER_COLORS[idx], cursor: null };
+    const user = { id: socket.id, name, color: USER_COLORS[idx], avatar, cursor: null, activeFileId: room.activeFileId };
     activeUsers.set(socket.id, { ...user, roomId });
+
+    // Send Yjs state vectors for all files so new user can sync
+    const yjsStates = {};
+    for (const file of room.files) {
+      const doc = getYDoc(roomId, file.id);
+      yjsStates[file.id] = Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64");
+    }
 
     const roomUserList = getRoomUsers(roomId);
     socket.emit("room-state", {
-      code: room.code,
-      language: room.language,
+      files: room.files,
+      activeFileId: room.activeFileId,
       users: roomUserList,
       yourId: socket.id,
       chatHistory: room.chatHistory || [],
+      yjsStates,
     });
     socket.to(roomId).emit("user-joined", { user });
     io.to(roomId).emit("users-updated", { users: roomUserList });
     console.log(`[JOIN] ${name} → ${roomId}`);
   });
 
-  socket.on("code-change", async ({ roomId, code }) => {
-    await store.updateRoomCode(roomId, code);
-    socket.to(roomId).emit("code-update", { code });
+  // ── YJS SYNC — client sends update, server applies + broadcasts ──
+  socket.on("yjs-update", ({ roomId, fileId, update }) => {
+    const doc = getYDoc(roomId, fileId);
+    const updateBytes = Buffer.from(update, "base64");
+    Y.applyUpdate(doc, updateBytes);
+
+    // Save to store (debounce handled by client)
+    const text = doc.getText("content").toString();
+    store.updateFileContent(roomId, fileId, text).catch(() => {});
+
+    // Broadcast to everyone else
+    socket.to(roomId).emit("yjs-update", { fileId, update });
   });
 
-  socket.on("language-change", async ({ roomId, language }) => {
-    await store.updateRoomLanguage(roomId, language);
-    socket.to(roomId).emit("language-update", { language });
+  // ── FILE OPERATIONS ──────────────────────────────────────────────
+  socket.on("file-create", async ({ roomId, file }) => {
+    await store.createFile(roomId, file);
+    // Init empty Yjs doc for new file
+    const doc = getYDoc(roomId, file.id);
+    const text = doc.getText("content");
+    doc.transact(() => { text.insert(0, file.content || ""); });
+    io.to(roomId).emit("file-created", { file });
   });
 
-  socket.on("cursor-move", ({ roomId, position, selection }) => {
+  socket.on("file-rename", async ({ roomId, fileId, name }) => {
+    await store.renameFile(roomId, fileId, name);
+    io.to(roomId).emit("file-renamed", { fileId, name });
+  });
+
+  socket.on("file-delete", async ({ roomId, fileId }) => {
+    await store.deleteFile(roomId, fileId);
+    delete (yjsDocs[roomId] || {})[fileId];
+    io.to(roomId).emit("file-deleted", { fileId });
+  });
+
+  socket.on("file-switch", ({ roomId, fileId }) => {
+    const user = activeUsers.get(socket.id);
+    if (user) user.activeFileId = fileId;
+    socket.to(roomId).emit("user-switched-file", { userId: socket.id, fileId });
+  });
+
+  // ── LANGUAGE CHANGE ──────────────────────────────────────────────
+  socket.on("language-change", async ({ roomId, fileId, language }) => {
+    const room = await store.getRoom(roomId);
+    if (room) {
+      const file = room.files.find(f => f.id === fileId);
+      if (file) {
+        file.language = language;
+        await store.updateFileContent(roomId, fileId, file.content);
+      }
+    }
+    io.to(roomId).emit("language-update", { fileId, language });
+  });
+
+  // ── CURSOR MOVE ──────────────────────────────────────────────────
+  socket.on("cursor-move", ({ roomId, fileId, position, selection }) => {
     const user = activeUsers.get(socket.id);
     if (!user) return;
-    user.cursor = { position, selection };
     socket.to(roomId).emit("cursor-update", {
-      userId: socket.id, position, selection,
+      userId: socket.id, fileId, position, selection,
       color: user.color, name: user.name,
     });
   });
 
+  // ── CHAT ─────────────────────────────────────────────────────────
   socket.on("chat-message", async ({ roomId, text }) => {
     if (!text?.trim()) return;
     const user = activeUsers.get(socket.id);
     if (!user) return;
     const message = {
-      id: uuidv4(),
-      userId: socket.id,
-      username: user.name,
-      color: user.color,
-      text: text.trim().slice(0, 500),
-      timestamp: Date.now(),
+      id: uuidv4(), userId: socket.id, username: user.name,
+      color: user.color, avatar: user.avatar || "",
+      text: text.trim().slice(0, 500), timestamp: Date.now(),
     };
     await store.appendChatMessage(roomId, message);
     io.to(roomId).emit("chat-message", message);
   });
 
+  // ── DISCONNECT ───────────────────────────────────────────────────
   socket.on("disconnect", () => {
     const roomId = socket.roomId;
     const user = activeUsers.get(socket.id);
     activeUsers.delete(socket.id);
     if (!roomId) return;
     const sockets = roomSockets.get(roomId);
-    if (sockets) {
-      sockets.delete(socket.id);
-      if (sockets.size === 0) roomSockets.delete(roomId);
-    }
+    if (sockets) { sockets.delete(socket.id); if (sockets.size === 0) { roomSockets.delete(roomId); delete yjsDocs[roomId]; } }
     console.log(`[-] ${user?.name || socket.id} left ${roomId}`);
     io.to(roomId).emit("user-left", { userId: socket.id });
     io.to(roomId).emit("users-updated", { users: getRoomUsers(roomId) });
@@ -246,11 +354,9 @@ io.on("connection", (socket) => {
 function getRoomUsers(roomId) {
   const sockets = roomSockets.get(roomId);
   if (!sockets) return [];
-  return Array.from(sockets).map((id) => activeUsers.get(id)).filter(Boolean)
-    .map(({ id, name, color, cursor }) => ({ id, name, color, cursor }));
+  return Array.from(sockets).map(id => activeUsers.get(id)).filter(Boolean)
+    .map(({ id, name, color, avatar, cursor, activeFileId }) => ({ id, name, color, avatar, cursor, activeFileId }));
 }
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`\n🚀 CollabCode server → http://localhost:${PORT}\n`);
-});
+server.listen(PORT, () => console.log(`\n🚀 CollabCode v3 → http://localhost:${PORT}\n`));

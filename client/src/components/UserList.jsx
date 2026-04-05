@@ -7,32 +7,30 @@ export default function UserList({ users, myId }) {
         <span className={styles.headerTitle}>COLLABORATORS</span>
         <span className={styles.headerCount}>{users.length}</span>
       </div>
-
       <div className={styles.list}>
         {users.map((user) => (
           <div key={user.id} className={styles.user}>
-            <div
-              className={styles.avatar}
-              style={{ background: user.color + "22", border: `1.5px solid ${user.color}` }}
-            >
-              <span style={{ color: user.color }}>{user.name.charAt(0).toUpperCase()}</span>
-            </div>
+            {user.avatar ? (
+              <img src={user.avatar} className={styles.avatarImg}
+                style={{ border: `1.5px solid ${user.color}` }} alt={user.name} />
+            ) : (
+              <div className={styles.avatar}
+                style={{ background: user.color + "22", border: `1.5px solid ${user.color}` }}>
+                <span style={{ color: user.color }}>{user.name.charAt(0).toUpperCase()}</span>
+              </div>
+            )}
             <div className={styles.userInfo}>
               <span className={styles.userName}>
                 {user.name}
                 {user.id === myId && <span className={styles.youBadge}> you</span>}
               </span>
-              <span className={styles.userStatus}>● editing</span>
+              <span className={styles.userStatus} style={{ color: user.color }}>● editing</span>
             </div>
           </div>
         ))}
       </div>
-
-      {/* Legend */}
       <div className={styles.footer}>
-        <p className={styles.footerText}>
-          Cursors are color-coded per collaborator. Changes sync in real-time.
-        </p>
+        <p className={styles.footerText}>Cursors are color-coded per collaborator.</p>
       </div>
     </div>
   );

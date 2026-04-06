@@ -1,174 +1,184 @@
-# CollabCode 🚀
+# CollabCode v4 🚀
 
-A real-time collaborative code editor supporting simultaneous multi-user editing with live cursor sync, powered by **Socket.io**, **Monaco Editor** (VS Code's core engine), and **React**.
+A production-grade real-time collaborative code editor with dual-mode support — **Personal** (AI-assisted coding) and **Interview** (structured technical interviews).
 
----
-
-## Tech Stack
-
-| Layer     | Technology                        |
-|-----------|-----------------------------------|
-| Frontend  | React 18, Vite                    |
-| Editor    | Monaco Editor (`@monaco-editor/react`) |
-| Backend   | Node.js, Express                  |
-| Real-time | Socket.io (WebSocket)             |
+🔗 **Live Demo:** [collab-code-s8vw.vercel.app](https://collab-code-s8vw.vercel.app)
+📦 **Repo:** [github.com/luicifersaunik/collab-code](https://github.com/luicifersaunik/collab-code)
 
 ---
 
-## Features
+## ✨ Features
 
-- **Real-time collaborative editing** — changes propagate instantly to all users in the same room
-- **Live cursor & selection sync** — each collaborator gets a unique color; their cursor and text selections are visible to everyone else
-- **Room-based sessions** — 8-character room codes; create or join with no account required
-- **Monaco Editor** — full VS Code editing experience with syntax highlighting, bracket coloring, and IntelliSense
-- **15 supported languages** — JavaScript, TypeScript, Python, Rust, Go, C++, Java, SQL, and more
-- **Shareable links** — copy a link and send it; recipients land directly in your room
-- **Event-driven backend** — efficient WebSocket handling for concurrent multi-user load
+### Both Modes
+- **Real-time collaborative editing** — conflict-free simultaneous editing via Yjs CRDT, sub-100ms sync
+- **Multi-file tabs** — create, rename, delete files per room; each file has its own Yjs doc
+- **Live cursor & selection sync** — color-coded per user with floating name labels
+- **Code execution** — sandboxed via Judge0 across 14 languages with stdin support
+- **Real-time chat** — persistent message history per room, unread badge
+- **JWT Authentication** — bcrypt-hashed passwords, 7-day tokens
+- **GitHub OAuth** — one-click login via Passport.js
+- **Room-based sessions** — 8-character invite codes, shareable links
+- **Redis persistence** — rooms, chat, files survive server restarts (in-memory fallback for dev)
 
----
+### 👨‍💻 Personal Mode
+- **AI coding assistant** — powered by Groq (Llama 3.3 70B), free tier
+- Quick prompts: Explain code, Fix bug, Optimize, Add comments, Write tests, Explain error
+- Context-aware — AI sees your current code and language automatically
+- Markdown code block rendering in chat
 
-## Project Structure
-
-```
-collabcode/
-├── server/
-│   ├── server.js          # Express + Socket.io backend
-│   └── package.json
-├── client/
-│   ├── src/
-│   │   ├── App.jsx            # Root — routing between Landing & Editor
-│   │   ├── socket.js          # Socket.io singleton
-│   │   └── components/
-│   │       ├── Landing.jsx        # Create / join room page
-│   │       ├── Landing.module.css
-│   │       ├── EditorPage.jsx     # Main editor + socket logic
-│   │       ├── EditorPage.module.css
-│   │       ├── Toolbar.jsx        # Room info, language selector, leave
-│   │       ├── Toolbar.module.css
-│   │       ├── UserList.jsx       # Connected users sidebar
-│   │       └── UserList.module.css
-│   ├── index.html
-│   ├── vite.config.js
-│   └── package.json
-└── package.json           # Root scripts
-```
+### 🏢 Interview Mode
+- **Session timer** — circular countdown, interviewer-controlled start, color changes as time runs out
+- **Private interviewer notes** — auto-saved, never visible to candidates
+- **Feedback form** — star rating, hire/no-hire decision, strengths & improvements
+- **AI disabled** — candidates cannot use AI assistance, enforced server-side
+- Role-based joining — Interviewer or Candidate
 
 ---
 
-## Getting Started
+## 🛠 Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18, Vite |
+| Editor | Monaco Editor (VS Code engine) |
+| Real-time sync | Socket.io WebSockets + Yjs CRDT |
+| Backend | Node.js, Express |
+| Auth | JWT, bcrypt, Passport.js (GitHub OAuth) |
+| AI | Groq API (Llama 3.3 70B) — free tier |
+| Code execution | Judge0 API proxy |
+| Persistence | Redis (with in-memory fallback) |
+| Deployment | Railway (backend) + Vercel (frontend) |
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
-
 - Node.js 18+
 - npm 8+
 
 ### 1. Install dependencies
-
-```bash
-# From the project root
-npm run install:all
-```
-
-Or manually:
 ```bash
 cd server && npm install
 cd ../client && npm install
 ```
 
-### 2. Run in development
-
-Open **two terminals**:
-
-**Terminal 1 — Backend:**
-```bash
-cd server
-npm run dev        # nodemon, auto-restarts on change
-# Server runs on http://localhost:3001
+### 2. Configure environment
+Create `server/.env`:
+```
+PORT=3001
+JWT_SECRET=your-long-random-secret
+SESSION_SECRET=another-random-secret
+GROQ_API_KEY=gsk_your_groq_key        # free at console.groq.com
+JUDGE0_URL=https://ce.judge0.com
+# REDIS_URL=redis://localhost:6379    # optional
+# GITHUB_CLIENT_ID=your_id           # optional
+# GITHUB_CLIENT_SECRET=your_secret   # optional
+# BACKEND_URL=http://localhost:3001
+# FRONTEND_URL=http://localhost:3000
 ```
 
-**Terminal 2 — Frontend:**
+### 3. Run
 ```bash
-cd client
-npm run dev        # Vite dev server with HMR
-# App runs on http://localhost:3000
+# Terminal 1 — backend
+cd server && npm run dev
+
+# Terminal 2 — frontend
+cd client && npm run dev
 ```
 
-The Vite proxy in `vite.config.js` forwards `/api` and `/socket.io` to the backend automatically — no CORS issues in dev.
-
-### 3. Open the app
-
-Navigate to **http://localhost:3000**, create a room, copy the invite link, and open it in another tab or browser to test live collaboration.
+Open **http://localhost:3000**
 
 ---
 
-## How It Works
+## 🏗 Architecture
+
+```
+User Browser
+     │
+     ├── HTTPS ──► Vercel (React/Vite frontend)
+     │                  │
+     └── WSS ────► Railway (Node.js + Socket.io)
+                        │
+                   ┌────┴────┐
+                   │         │
+                Redis      Groq API
+              (rooms)     (AI assist)
+                   │
+              Judge0 API
+           (code execution)
+```
+
+### How real-time sync works (Yjs CRDT)
+Each file in a room has its own `Y.Doc`. Edits are encoded as binary updates and broadcast via Socket.io. On join, the server sends the current state vector so the new user merges cleanly. No edit conflicts under any concurrency level.
 
 ### Room lifecycle
-
-1. User clicks **Create Room** → POST `/api/room/create` → server generates an 8-char ID and initializes room state in memory
-2. User (or invited collaborator) opens invite link → GET `/api/room/:id` validates existence
-3. Socket connects → `join-room` event → server sends `room-state` (current code, language, all users)
-4. Server emits `user-joined` and `users-updated` to existing occupants
-5. On disconnect → user removed from room; empty rooms are garbage-collected
-
-### Real-time sync
-
-| Event (client → server) | Event (server → client) | Payload |
-|--------------------------|--------------------------|---------|
-| `code-change`            | `code-update`            | Full code string |
-| `language-change`        | `language-update`        | Language ID |
-| `cursor-move`            | `cursor-update`          | Position + selection + color + name |
-| `join-room`              | `room-state`             | Initial snapshot |
-| *(disconnect)*           | `user-left`              | Socket ID |
-
-### Cursor rendering
-
-Remote cursors are rendered as Monaco Editor decorations. Each user gets a unique color from a 10-color palette. Dynamic `<style>` tags inject per-user CSS classes (`.remoteCursor-{shortId}`, `.remoteSelection-{shortId}`) that Monaco targets via `afterContentClassName` to show floating name labels above the cursor.
+1. Create room → choose Personal or Interview mode → get 8-char code
+2. Socket connects → `join-room` event → server sends full room state
+3. All edits, cursor moves, file ops, chat sync in real time
+4. On disconnect → user removed, empty rooms garbage collected
 
 ---
 
-## Production Deployment
+## 🔌 API Reference
 
-### Build the client
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/auth/register` | Register with username + password |
+| POST | `/api/auth/login` | Login, returns JWT |
+| GET | `/api/auth/me` | Validate token |
+| GET | `/api/auth/github` | GitHub OAuth redirect |
+| POST | `/api/room/create` | Create room (`mode`, `timerDuration`) |
+| GET | `/api/room/:id` | Check if room exists |
+| POST | `/api/execute` | Run code (`code`, `language`, `stdin`) |
+| POST | `/api/ai-assist` | AI chat (`prompt`, `code`, `language`) |
+| POST | `/api/room/:id/feedback` | Save interview feedback |
 
-```bash
-npm run build
-# Output in client/dist/
+### Socket events
+
+| Client → Server | Server → Client | Description |
+|----------------|-----------------|-------------|
+| `join-room` | `room-state` | Join and receive full state |
+| `yjs-update` | `yjs-update` | CRDT sync update |
+| `file-create` | `file-created` | New file tab |
+| `file-rename` | `file-renamed` | Rename tab |
+| `file-delete` | `file-deleted` | Delete tab |
+| `cursor-move` | `cursor-update` | Live cursor position |
+| `chat-message` | `chat-message` | Chat broadcast |
+| `timer-start` | `timer-started` | Interview timer |
+| `notes-update` | `notes-saved` | Private interviewer notes |
+
+---
+
+## 🌍 Production Deployment
+
+| Service | Platform | Notes |
+|---------|----------|-------|
+| Frontend | Vercel | Root dir: `client`, Framework: Vite |
+| Backend | Railway | Root dir: `server`, Start: `node server.js` |
+
+### Environment variables — Railway
+```
+NODE_ENV=production
+PORT=3001
+JWT_SECRET=...
+SESSION_SECRET=...
+GROQ_API_KEY=...
+JUDGE0_URL=https://ce.judge0.com
+BACKEND_URL=https://your-railway-url.up.railway.app
+FRONTEND_URL=https://your-vercel-url.vercel.app
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
 ```
 
-### Serve static files from Express
-
-Add to `server/server.js` before `server.listen`:
-
-```js
-const path = require("path");
-app.use(express.static(path.join(__dirname, "../client/dist")));
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "../client/dist/index.html"));
-});
+### Environment variables — Vercel
+```
+VITE_SERVER_URL=https://your-railway-url.up.railway.app
+VITE_GITHUB_OAUTH=true
 ```
 
-### Environment variables
-
-| Variable    | Default       | Description            |
-|-------------|---------------|------------------------|
-| `PORT`      | `3001`        | Backend port           |
-| `VITE_SERVER_URL` | `""`    | WS server URL in prod  |
-
-Set `VITE_SERVER_URL=https://your-api-domain.com` in `client/.env.production` before building.
-
 ---
 
-## Extending the Project
-
-- **Operational Transformation / CRDT** — replace full-string broadcast with `y-monaco` + Yjs for conflict-free merging under high concurrency
-- **Persistent rooms** — swap in-memory store for Redis or PostgreSQL
-- **Code execution** — add a sandboxed runner (e.g. Judge0 API) and a Run button
-- **Chat panel** — add a `chat-message` socket event and a side panel
-- **Auth** — add JWT or OAuth to enable named persistent sessions
-
----
-
-## License
+## 📄 License
 
 MIT

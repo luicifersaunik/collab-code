@@ -65,3 +65,14 @@
   display: flex;
   flex-direction: column;
 }
+
+.tabAI { }
+.tabAI.tabActive { color:#ffd93d;border-bottom-color:#ffd93d; }
+.tabInterview { }
+.tabInterview.tabActive { color:#c77dff;border-bottom-color:#c77dff; }
+
+.unreadBadge {
+  font-size:9px;font-weight:700;font-family:var(--font-mono);
+  background:rgba(255,107,107,0.2);border:1px solid rgba(255,107,107,0.3);
+  color:#ff6b6b;padding:1px 5px;border-radius:10px;margin-left:3px;
+}

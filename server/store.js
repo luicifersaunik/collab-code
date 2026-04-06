@@ -2,12 +2,14 @@
  * store.js — Persistent store abstraction (Redis or in-memory)
  *
  * Room schema:
+ *   mode: "personal" | "interview"
  *   files: JSON array of { id, name, language, content }
  *   activeFileId: string
  *   chatHistory: JSON array
- *
- * User schema:
- *   username, passwordHash, avatar (GitHub), createdAt
+ *   interviewNotes: string (interviewer-only, interview mode)
+ *   interviewFeedback: JSON object
+ *   timerDuration: number (minutes, interview mode)
+ *   timerStartedAt: number (timestamp)
  */
 
 const Redis = require("ioredis");
@@ -43,18 +45,28 @@ async function roomExists(roomId) {
   return memRooms.has(roomId);
 }
 
-async function createRoom(roomId) {
+async function createRoom(roomId, mode = "personal", timerDuration = 45) {
   const defaultFile = DEFAULT_FILE("file-1");
   const data = {
+    mode,
     files: [defaultFile],
     activeFileId: defaultFile.id,
     chatHistory: [],
+    interviewNotes: "",
+    interviewFeedback: null,
+    timerDuration,
+    timerStartedAt: null,
   };
   if (redis) {
     await redis.hset(`room:${roomId}`,
+      "mode", mode,
       "files", JSON.stringify(data.files),
       "activeFileId", data.activeFileId,
-      "chatHistory", JSON.stringify([])
+      "chatHistory", JSON.stringify([]),
+      "interviewNotes", "",
+      "interviewFeedback", "null",
+      "timerDuration", timerDuration,
+      "timerStartedAt", "null"
     );
     await redis.expire(`room:${roomId}`, ROOM_TTL);
   } else {
@@ -68,9 +80,14 @@ async function getRoom(roomId) {
     const raw = await redis.hgetall(`room:${roomId}`);
     if (!raw || !raw.files) return null;
     return {
+      mode: raw.mode || "personal",
       files: JSON.parse(raw.files),
       activeFileId: raw.activeFileId,
       chatHistory: JSON.parse(raw.chatHistory || "[]"),
+      interviewNotes: raw.interviewNotes || "",
+      interviewFeedback: JSON.parse(raw.interviewFeedback || "null"),
+      timerDuration: Number(raw.timerDuration) || 45,
+      timerStartedAt: raw.timerStartedAt === "null" ? null : Number(raw.timerStartedAt),
     };
   }
   return memRooms.get(roomId) || null;
@@ -125,12 +142,8 @@ async function deleteFile(roomId, fileId) {
 }
 
 async function setActiveFile(roomId, fileId) {
-  if (redis) {
-    await redis.hset(`room:${roomId}`, "activeFileId", fileId);
-  } else {
-    const room = memRooms.get(roomId);
-    if (room) room.activeFileId = fileId;
-  }
+  if (redis) await redis.hset(`room:${roomId}`, "activeFileId", fileId);
+  else { const room = memRooms.get(roomId); if (room) room.activeFileId = fileId; }
 }
 
 async function appendChatMessage(roomId, message) {
@@ -148,6 +161,23 @@ async function appendChatMessage(roomId, message) {
     room.chatHistory = room.chatHistory.slice(-200);
     return room.chatHistory;
   }
+}
+
+async function updateInterviewNotes(roomId, notes) {
+  if (redis) await redis.hset(`room:${roomId}`, "interviewNotes", notes);
+  else { const room = memRooms.get(roomId); if (room) room.interviewNotes = notes; }
+}
+
+async function saveInterviewFeedback(roomId, feedback) {
+  if (redis) await redis.hset(`room:${roomId}`, "interviewFeedback", JSON.stringify(feedback));
+  else { const room = memRooms.get(roomId); if (room) room.interviewFeedback = feedback; }
+}
+
+async function startTimer(roomId) {
+  const now = Date.now();
+  if (redis) await redis.hset(`room:${roomId}`, "timerStartedAt", now);
+  else { const room = memRooms.get(roomId); if (room) room.timerStartedAt = now; }
+  return now;
 }
 
 async function deleteRoom(roomId) {
@@ -184,7 +214,6 @@ async function getUser(username) {
 module.exports = {
   roomExists, createRoom, getRoom,
   updateFileContent, createFile, renameFile, deleteFile, setActiveFile,
-  appendChatMessage, deleteRoom,
-  userExists, createUser, getUser,
-  DEFAULT_FILE,
+  appendChatMessage, updateInterviewNotes, saveInterviewFeedback, startTimer,
+  deleteRoom, userExists, createUser, getUser, DEFAULT_FILE,
 };

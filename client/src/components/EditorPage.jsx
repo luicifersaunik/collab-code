@@ -11,26 +11,19 @@ import OutputPanel from "./OutputPanel";
 import styles from "./EditorPage.module.css";
 
 const SUPPORTED_LANGUAGES = [
-  { id: "javascript", label: "JavaScript" },
-  { id: "typescript", label: "TypeScript" },
-  { id: "python", label: "Python" },
-  { id: "java", label: "Java" },
-  { id: "cpp", label: "C++" },
-  { id: "c", label: "C" },
-  { id: "csharp", label: "C#" },
-  { id: "rust", label: "Rust" },
-  { id: "go", label: "Go" },
-  { id: "html", label: "HTML" },
-  { id: "css", label: "CSS" },
-  { id: "json", label: "JSON" },
-  { id: "markdown", label: "Markdown" },
-  { id: "sql", label: "SQL" },
+  { id: "javascript", label: "JavaScript" }, { id: "typescript", label: "TypeScript" },
+  { id: "python", label: "Python" }, { id: "java", label: "Java" },
+  { id: "cpp", label: "C++" }, { id: "c", label: "C" },
+  { id: "csharp", label: "C#" }, { id: "rust", label: "Rust" },
+  { id: "go", label: "Go" }, { id: "html", label: "HTML" },
+  { id: "css", label: "CSS" }, { id: "json", label: "JSON" },
+  { id: "markdown", label: "Markdown" }, { id: "sql", label: "SQL" },
   { id: "shell", label: "Shell" },
 ];
 
 const RUNNABLE = new Set(["javascript","typescript","python","java","cpp","c","csharp","rust","go","shell","ruby","php","swift","kotlin"]);
 
-export default function EditorPage({ roomId, username, token, avatar, onLeave, onLogout }) {
+export default function EditorPage({ roomId, username, token, avatar, mode, role, onLeave, onLogout }) {
   const [files, setFiles] = useState([]);
   const [activeFileId, setActiveFileId] = useState(null);
   const [users, setUsers] = useState([]);
@@ -42,17 +35,21 @@ export default function EditorPage({ roomId, username, token, avatar, onLeave, o
   const [execResult, setExecResult] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
   const [stdin, setStdin] = useState("");
+  // Interview state
+  const [timerDuration, setTimerDuration] = useState(45);
+  const [timerStartedAt, setTimerStartedAt] = useState(null);
+  // Room mode (comes from server, authoritative)
+  const [roomMode, setRoomMode] = useState(mode || "personal");
 
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const cursorsRef = useRef({});
   const chatOpenRef = useRef(false);
-
-  // Yjs: one Y.Doc per file
-  const ydocsRef = useRef({});       // fileId → Y.Doc
-  const bindingRef = useRef(null);   // current MonacoBinding
+  const ydocsRef = useRef({});
+  const bindingRef = useRef(null);
 
   const activeFile = files.find(f => f.id === activeFileId);
+  const activeCode = ydocsRef.current[activeFileId]?.getText("content").toString() || "";
 
   const addNotification = useCallback((msg) => {
     const id = Date.now() + Math.random();
@@ -60,7 +57,6 @@ export default function EditorPage({ roomId, username, token, avatar, onLeave, o
     setTimeout(() => setNotifications(p => p.filter(n => n.id !== id)), 3000);
   }, []);
 
-  // ── Get or create a Y.Doc for a file ──────────────────────────────────────
   const getYDoc = useCallback((fileId) => {
     if (!ydocsRef.current[fileId]) {
       const doc = new Y.Doc();
@@ -72,98 +68,69 @@ export default function EditorPage({ roomId, username, token, avatar, onLeave, o
     return ydocsRef.current[fileId];
   }, [roomId]);
 
-  // ── Bind Monaco to current file's Y.Doc ───────────────────────────────────
   const bindEditor = useCallback((fileId) => {
     if (!editorRef.current || !monacoRef.current) return;
     if (bindingRef.current) { bindingRef.current.destroy(); bindingRef.current = null; }
     const doc = getYDoc(fileId);
     const yText = doc.getText("content");
-    bindingRef.current = new MonacoBinding(
-      yText,
-      editorRef.current.getModel(),
-      new Set([editorRef.current])
-    );
+    bindingRef.current = new MonacoBinding(yText, editorRef.current.getModel(), new Set([editorRef.current]));
   }, [getYDoc]);
 
-  // ── Socket setup ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (token) socket.auth = { token };
     socket.connect();
 
     socket.on("connect", () => {
       setIsConnected(true);
-      socket.emit("join-room", { roomId, username });
+      socket.emit("join-room", { roomId, username, role });
     });
     socket.on("disconnect", () => setIsConnected(false));
 
-    socket.on("room-state", ({ files: f, activeFileId: afId, users: u, yourId, chatHistory, yjsStates }) => {
-      setFiles(f);
-      setActiveFileId(afId);
-      setUsers(u);
-      setMyId(yourId);
+    socket.on("room-state", ({ mode: m, files: f, activeFileId: afId, users: u, yourId, chatHistory, yjsStates, timerDuration: td, timerStartedAt: ts }) => {
+      setRoomMode(m || "personal");
+      setFiles(f); setActiveFileId(afId);
+      setUsers(u); setMyId(yourId);
       setChatMessages(chatHistory || []);
-
-      // Apply server Yjs state for all files
+      if (td) setTimerDuration(td);
+      if (ts) setTimerStartedAt(ts);
       if (yjsStates) {
         Object.entries(yjsStates).forEach(([fileId, b64]) => {
-          const doc = getYDoc(fileId);
-          Y.applyUpdate(doc, Buffer.from(b64, "base64"));
+          Y.applyUpdate(getYDoc(fileId), Buffer.from(b64, "base64"));
         });
       }
     });
 
     socket.on("yjs-update", ({ fileId, update }) => {
-      const doc = getYDoc(fileId);
-      Y.applyUpdate(doc, Buffer.from(update, "base64"));
+      Y.applyUpdate(getYDoc(fileId), Buffer.from(update, "base64"));
     });
 
     socket.on("users-updated", ({ users: u }) => setUsers(u));
     socket.on("user-joined", ({ user }) => addNotification(`${user.name} joined`));
     socket.on("user-left", ({ userId }) => removeCursorDecorations(userId));
-
     socket.on("cursor-update", ({ userId, fileId, position, selection, color, name }) => {
       if (fileId === activeFileId) renderRemoteCursor(userId, position, selection, color, name);
     });
-
-    socket.on("file-created", ({ file }) => {
-      setFiles(p => [...p, file]);
-      addNotification(`File "${file.name}" created`);
-    });
-    socket.on("file-renamed", ({ fileId, name }) => {
-      setFiles(p => p.map(f => f.id === fileId ? { ...f, name } : f));
-    });
+    socket.on("file-created", ({ file }) => { setFiles(p => [...p, file]); addNotification(`"${file.name}" created`); });
+    socket.on("file-renamed", ({ fileId, name }) => setFiles(p => p.map(f => f.id === fileId ? { ...f, name } : f)));
     socket.on("file-deleted", ({ fileId }) => {
-      setFiles(p => {
-        const remaining = p.filter(f => f.id !== fileId);
-        if (remaining.length > 0) setActiveFileId(remaining[0].id);
-        return remaining;
-      });
+      setFiles(p => { const r = p.filter(f => f.id !== fileId); if (r.length > 0) setActiveFileId(r[0].id); return r; });
       delete ydocsRef.current[fileId];
     });
-    socket.on("language-update", ({ fileId, language }) => {
-      setFiles(p => p.map(f => f.id === fileId ? { ...f, language } : f));
-    });
-
-    socket.on("chat-message", (msg) => {
-      setChatMessages(p => [...p, msg]);
-      if (!chatOpenRef.current) setUnreadChat(n => n + 1);
-    });
+    socket.on("language-update", ({ fileId, language }) => setFiles(p => p.map(f => f.id === fileId ? { ...f, language } : f)));
+    socket.on("chat-message", (msg) => { setChatMessages(p => [...p, msg]); if (!chatOpenRef.current) setUnreadChat(n => n + 1); });
+    socket.on("timer-started", ({ startedAt }) => { setTimerStartedAt(startedAt); addNotification("⏱ Interview timer started!"); });
 
     return () => {
-      ["connect","disconnect","room-state","yjs-update","users-updated","user-joined",
-       "user-left","cursor-update","file-created","file-renamed","file-deleted",
-       "language-update","chat-message"].forEach(e => socket.off(e));
+      ["connect","disconnect","room-state","yjs-update","users-updated","user-joined","user-left",
+       "cursor-update","file-created","file-renamed","file-deleted","language-update","chat-message","timer-started"]
+        .forEach(e => socket.off(e));
       if (bindingRef.current) bindingRef.current.destroy();
       socket.disconnect();
     };
-  }, [roomId, username]);
+  }, [roomId, username, role]);
 
-  // Re-bind editor when active file changes
-  useEffect(() => {
-    if (activeFileId && editorRef.current) bindEditor(activeFileId);
-  }, [activeFileId, bindEditor]);
+  useEffect(() => { if (activeFileId && editorRef.current) bindEditor(activeFileId); }, [activeFileId, bindEditor]);
 
-  // ── Cursor helpers ────────────────────────────────────────────────────────
   const removeCursorDecorations = (userId) => {
     if (!editorRef.current || !cursorsRef.current[userId]) return;
     editorRef.current.deltaDecorations(cursorsRef.current[userId].decorations, []);
@@ -172,109 +139,46 @@ export default function EditorPage({ roomId, username, token, avatar, onLeave, o
 
   const renderRemoteCursor = (userId, position, selection, color, name) => {
     if (!editorRef.current || !monacoRef.current) return;
-    const monaco = monacoRef.current;
-    const editor = editorRef.current;
+    const monaco = monacoRef.current; const editor = editorRef.current;
     const prev = cursorsRef.current[userId]?.decorations || [];
     const decors = [];
-    if (position) decors.push({
-      range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column + 1),
-      options: {
-        className: `remoteCursor-${userId.slice(0,6)}`,
-        afterContentClassName: `remoteCursorLabel-${userId.slice(0,6)}`,
-        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
-      },
-    });
-    if (selection && (selection.startLineNumber !== selection.endLineNumber || selection.startColumn !== selection.endColumn)) {
-      decors.push({
-        range: new monaco.Range(selection.startLineNumber, selection.startColumn, selection.endLineNumber, selection.endColumn),
-        options: { className: `remoteSelection-${userId.slice(0,6)}`, stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges },
-      });
-    }
+    if (position) decors.push({ range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column + 1), options: { className: `remoteCursor-${userId.slice(0,6)}`, afterContentClassName: `remoteCursorLabel-${userId.slice(0,6)}`, stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges } });
+    if (selection && (selection.startLineNumber !== selection.endLineNumber || selection.startColumn !== selection.endColumn)) decors.push({ range: new monaco.Range(selection.startLineNumber, selection.startColumn, selection.endLineNumber, selection.endColumn), options: { className: `remoteSelection-${userId.slice(0,6)}`, stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges } });
     const styleId = `cursor-style-${userId.slice(0,6)}`;
     if (!document.getElementById(styleId)) {
-      const s = document.createElement("style");
-      s.id = styleId;
-      const sid = userId.slice(0,6);
-      s.textContent = `
-        .remoteCursor-${sid}{border-left:2px solid ${color};margin-left:-1px;}
-        .remoteCursorLabel-${sid}::after{content:"${name}";background:${color};color:#0a0e17;font-size:10px;font-family:var(--font-mono);font-weight:700;padding:1px 5px;border-radius:2px;position:absolute;white-space:nowrap;z-index:100;pointer-events:none;top:-18px;}
-        .remoteSelection-${sid}{background:${color}22;}
-      `;
+      const s = document.createElement("style"); s.id = styleId;
+      s.textContent = `.remoteCursor-${userId.slice(0,6)}{border-left:2px solid ${color};margin-left:-1px;}.remoteCursorLabel-${userId.slice(0,6)}::after{content:"${name}";background:${color};color:#0a0e17;font-size:10px;font-family:var(--font-mono);font-weight:700;padding:1px 5px;border-radius:2px;position:absolute;white-space:nowrap;z-index:100;pointer-events:none;top:-18px;}.remoteSelection-${userId.slice(0,6)}{background:${color}22;}`;
       document.head.appendChild(s);
     }
     cursorsRef.current[userId] = { decorations: editor.deltaDecorations(prev, decors), color, name };
   };
 
-  // ── Editor mount ──────────────────────────────────────────────────────────
   const handleEditorDidMount = (editor, monaco) => {
-    editorRef.current = editor;
-    monacoRef.current = monaco;
+    editorRef.current = editor; monacoRef.current = monaco;
     if (activeFileId) bindEditor(activeFileId);
-
-    editor.onDidChangeCursorPosition((e) => {
-      socket.emit("cursor-move", { roomId, fileId: activeFileId, position: e.position, selection: editor.getSelection() });
-    });
-    editor.onDidChangeCursorSelection((e) => {
-      socket.emit("cursor-move", { roomId, fileId: activeFileId, position: e.selection.getStartPosition(), selection: e.selection });
-    });
+    editor.onDidChangeCursorPosition(e => socket.emit("cursor-move", { roomId, fileId: activeFileId, position: e.position, selection: editor.getSelection() }));
+    editor.onDidChangeCursorSelection(e => socket.emit("cursor-move", { roomId, fileId: activeFileId, position: e.selection.getStartPosition(), selection: e.selection }));
   };
 
-  // ── File tab handlers ─────────────────────────────────────────────────────
-  const handleFileSwitch = (fileId) => {
-    setActiveFileId(fileId);
-    socket.emit("file-switch", { roomId, fileId });
-    setExecResult(null);
-    // Bind editor to new file
-    setTimeout(() => bindEditor(fileId), 50);
-  };
+  const handleFileSwitch = (fileId) => { setActiveFileId(fileId); socket.emit("file-switch", { roomId, fileId }); setExecResult(null); setTimeout(() => bindEditor(fileId), 50); };
+  const handleFileCreate = (file) => { const doc = getYDoc(file.id); doc.getText("content").insert(0, file.content || ""); socket.emit("file-create", { roomId, file }); setActiveFileId(file.id); };
+  const handleFileRename = (fileId, name, language) => { socket.emit("file-rename", { roomId, fileId, name }); if (language) socket.emit("language-change", { roomId, fileId, language }); };
+  const handleFileDelete = (fileId) => { if (files.length <= 1) return addNotification("Cannot delete the last file."); socket.emit("file-delete", { roomId, fileId }); };
+  const handleLanguageChange = (language) => { if (!activeFileId) return; setFiles(p => p.map(f => f.id === activeFileId ? { ...f, language } : f)); socket.emit("language-change", { roomId, fileId: activeFileId, language }); setExecResult(null); };
 
-  const handleFileCreate = (file) => {
-    const doc = getYDoc(file.id);
-    doc.getText("content").insert(0, file.content || "");
-    socket.emit("file-create", { roomId, file });
-    setActiveFileId(file.id);
-  };
-
-  const handleFileRename = (fileId, name, language) => {
-    socket.emit("file-rename", { roomId, fileId, name });
-    if (language) socket.emit("language-change", { roomId, fileId, language });
-  };
-
-  const handleFileDelete = (fileId) => {
-    if (files.length <= 1) return addNotification("Cannot delete the last file.");
-    socket.emit("file-delete", { roomId, fileId });
-  };
-
-  // ── Language change ───────────────────────────────────────────────────────
-  const handleLanguageChange = (language) => {
-    if (!activeFileId) return;
-    setFiles(p => p.map(f => f.id === activeFileId ? { ...f, language } : f));
-    socket.emit("language-change", { roomId, fileId: activeFileId, language });
-    setExecResult(null);
-  };
-
-  // ── Run ───────────────────────────────────────────────────────────────────
   const handleRun = async () => {
     if (!activeFile) return;
-    setIsRunning(true);
-    setExecResult(null);
+    setIsRunning(true); setExecResult(null);
     try {
       const code = ydocsRef.current[activeFileId]?.getText("content").toString() || "";
-      const res = await fetch(apiUrl("/api/execute"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, language: activeFile.language, stdin }),
-      });
+      const res = await fetch(apiUrl("/api/execute"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, language: activeFile.language, stdin }) });
       setExecResult(await res.json());
     } catch { setExecResult({ error: "Failed to reach execution service." }); }
     finally { setIsRunning(false); }
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(`${window.location.origin}?room=${roomId}`);
-    addNotification("Invite link copied!");
-  };
-
+  const handleTimerStart = () => socket.emit("timer-start", { roomId });
+  const handleCopyLink = () => { navigator.clipboard.writeText(`${window.location.origin}?room=${roomId}`); addNotification("Invite link copied!"); };
   const handleSendMessage = (text) => socket.emit("chat-message", { roomId, text });
   const handleChatOpen = () => { chatOpenRef.current = true; setUnreadChat(0); };
 
@@ -282,72 +186,54 @@ export default function EditorPage({ roomId, username, token, avatar, onLeave, o
 
   return (
     <div className={styles.container}>
+      {/* Mode banner */}
+      {roomMode === "interview" && (
+        <div className={styles.modeBanner}>
+          <span className={styles.modeBannerIcon}>🏢</span>
+          Interview Mode
+          <span className={styles.modeBannerRole}>{role === "interviewer" ? "🎤 Interviewer" : "👨‍💻 Candidate"}</span>
+          <span className={styles.modeBannerNote}>AI assistant is disabled</span>
+        </div>
+      )}
+
       <Toolbar
         roomId={roomId} username={username} avatar={avatar}
         language={activeFile?.language || "javascript"}
-        languages={SUPPORTED_LANGUAGES}
-        isConnected={isConnected}
-        onLanguageChange={handleLanguageChange}
-        onCopyLink={handleCopyLink}
+        languages={SUPPORTED_LANGUAGES} isConnected={isConnected}
+        onLanguageChange={handleLanguageChange} onCopyLink={handleCopyLink}
         onLeave={onLeave} onLogout={onLogout}
-        userCount={users.length}
-        isRunning={isRunning} onRun={handleRun} canRun={canRun}
+        userCount={users.length} isRunning={isRunning} onRun={handleRun} canRun={canRun}
       />
 
       <div className={styles.workspace}>
         <div className={styles.editorColumn}>
-          <FileTabs
-            files={files}
-            activeFileId={activeFileId}
-            onSwitch={handleFileSwitch}
-            onCreate={handleFileCreate}
-            onRename={handleFileRename}
-            onDelete={handleFileDelete}
-          />
+          <FileTabs files={files} activeFileId={activeFileId}
+            onSwitch={handleFileSwitch} onCreate={handleFileCreate}
+            onRename={handleFileRename} onDelete={handleFileDelete} />
           <div className={styles.editorWrapper}>
             {activeFile && (
-              <Editor
-                key={activeFileId}
-                height="100%"
-                language={activeFile.language}
-                defaultValue=""
-                theme="vs-dark"
+              <Editor key={activeFileId} height="100%"
+                language={activeFile.language} defaultValue="" theme="vs-dark"
                 onMount={handleEditorDidMount}
-                options={{
-                  fontSize: 14,
-                  fontFamily: '"JetBrains Mono", monospace',
-                  fontLigatures: true,
-                  minimap: { enabled: true },
-                  scrollBeyondLastLine: false,
-                  cursorBlinking: "phase",
-                  cursorSmoothCaretAnimation: "on",
-                  smoothScrolling: true,
-                  padding: { top: 16, bottom: 16 },
-                  lineHeight: 1.7,
-                  bracketPairColorization: { enabled: true },
-                  tabSize: 2,
-                }}
+                options={{ fontSize:14, fontFamily:'"JetBrains Mono", monospace', fontLigatures:true, minimap:{enabled:true}, scrollBeyondLastLine:false, cursorBlinking:"phase", cursorSmoothCaretAnimation:"on", smoothScrolling:true, padding:{top:16,bottom:16}, lineHeight:1.7, bracketPairColorization:{enabled:true}, tabSize:2 }}
               />
             )}
           </div>
           {(execResult || isRunning) && (
-            <OutputPanel
-              result={execResult}
-              isRunning={isRunning}
-              stdin={stdin}
-              onStdinChange={setStdin}
-              onClose={() => setExecResult(null)}
-            />
+            <OutputPanel result={execResult} isRunning={isRunning} stdin={stdin} onStdinChange={setStdin} onClose={() => setExecResult(null)} />
           )}
         </div>
 
         <div className={styles.sidebar}>
           <Sidebar
+            mode={roomMode} role={role}
             users={users} myId={myId}
-            messages={chatMessages}
-            onSendMessage={handleSendMessage}
-            unreadCount={unreadChat}
-            onChatOpen={handleChatOpen}
+            messages={chatMessages} onSendMessage={handleSendMessage}
+            unreadCount={unreadChat} onChatOpen={handleChatOpen}
+            roomId={roomId} activeCode={activeCode}
+            language={activeFile?.language || "javascript"}
+            timerDuration={timerDuration} timerStartedAt={timerStartedAt}
+            onTimerStart={handleTimerStart} socket={socket}
           />
         </div>
       </div>

@@ -71,3 +71,31 @@
   from { opacity: 1; }
   to   { opacity: 0; }
 }
+
+.modeBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  background: rgba(199,125,255,0.08);
+  border-bottom: 1px solid rgba(199,125,255,0.2);
+  font-size: 12px;
+  font-weight: 600;
+  color: #c77dff;
+  flex-shrink: 0;
+}
+.modeBannerIcon { font-size: 14px; }
+.modeBannerRole {
+  margin-left: 8px;
+  background: rgba(199,125,255,0.12);
+  border: 1px solid rgba(199,125,255,0.2);
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.modeBannerNote {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}

@@ -1,0 +1,59 @@
+.container { display:flex;flex-direction:column;height:100%; }
+
+.tabs { display:flex;border-bottom:1px solid var(--border);flex-shrink:0; }
+.tab { flex:1;padding:10px 6px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-secondary);font-family:var(--font-sans);font-size:11px;font-weight:600;cursor:pointer;transition:all 0.15s;margin-bottom:-1px; }
+.tab:hover { color:var(--text-primary); }
+.tabActive { color:#c77dff;border-bottom-color:#c77dff; }
+
+.content { flex:1;overflow-y:auto;padding:16px; }
+
+/* Timer */
+.timerPane { display:flex;flex-direction:column;align-items:center;gap:16px; }
+.timerCircle { position:relative;width:140px;height:140px; }
+.timerSvg { width:100%;height:100%; }
+.timerDisplay { position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center; }
+.timerTime { font-family:var(--font-mono);font-size:26px;font-weight:700;line-height:1; }
+.timerLabel { font-size:10px;color:var(--text-muted);margin-top:4px;text-transform:uppercase;letter-spacing:0.8px; }
+
+.startBtn { padding:10px 28px;background:#c77dff;border:none;border-radius:var(--radius);color:#0a0e17;font-family:var(--font-sans);font-size:13px;font-weight:700;cursor:pointer;transition:all 0.2s;box-shadow:0 4px 20px rgba(199,125,255,0.3); }
+.startBtn:hover { transform:translateY(-1px);box-shadow:0 6px 28px rgba(199,125,255,0.45); }
+
+.waitingText { font-size:12px;color:var(--text-muted);text-align:center;font-style:italic; }
+
+.timeUpBanner { background:rgba(255,71,87,0.15);border:1px solid rgba(255,71,87,0.3);border-radius:var(--radius);padding:10px 20px;color:var(--red);font-weight:700;font-size:14px;text-align:center; }
+
+.timerInfo { width:100%;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);padding:12px; }
+.timerInfoRow { display:flex;justify-content:space-between;font-size:12px;padding:4px 0; }
+.timerInfoRow span:first-child { color:var(--text-muted); }
+.timerInfoRow span:last-child { color:var(--text-primary);font-weight:500; }
+.roleInterviewer { color:#c77dff!important; }
+.roleCandidate { color:var(--accent)!important; }
+
+/* Notes */
+.notesPane { display:flex;flex-direction:column;gap:8px;height:calc(100% - 32px); }
+.notesHint { font-size:11px;color:var(--text-muted);background:rgba(199,125,255,0.06);border:1px solid rgba(199,125,255,0.15);border-radius:6px;padding:8px 10px; }
+.notesArea { flex:1;min-height:200px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:12.5px;padding:12px;resize:none;outline:none;line-height:1.6; }
+.notesArea:focus { border-color:#c77dff; }
+.notesArea::placeholder { color:var(--text-muted); }
+
+/* Feedback */
+.feedbackPane { display:flex;flex-direction:column;gap:14px; }
+.feedbackField { display:flex;flex-direction:column;gap:6px; }
+.feedbackLabel { font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.8px; }
+
+.stars { display:flex;gap:4px; }
+.star { background:none;border:none;font-size:22px;color:var(--border-bright);cursor:pointer;transition:all 0.15s;padding:0; }
+.starActive { color:#ffd93d;text-shadow:0 0 8px rgba(255,217,61,0.5); }
+.star:hover { transform:scale(1.15); }
+
+.decisionBtns { display:flex;gap:6px;flex-wrap:wrap; }
+.decisionBtn { padding:7px 12px;background:var(--bg-secondary);border:1.5px solid var(--border);border-radius:var(--radius);color:var(--text-secondary);font-size:11px;font-weight:600;cursor:pointer;transition:all 0.15s; }
+.decisionActive { border-color:#c77dff;color:#c77dff;background:rgba(199,125,255,0.08); }
+
+.feedbackArea { background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-sans);font-size:12.5px;padding:10px;resize:none;outline:none;line-height:1.5;width:100%; }
+.feedbackArea:focus { border-color:#c77dff; }
+.feedbackArea::placeholder { color:var(--text-muted); }
+
+.saveBtn { padding:11px;background:#c77dff;border:none;border-radius:var(--radius);color:#0a0e17;font-family:var(--font-sans);font-size:13px;font-weight:700;cursor:pointer;transition:all 0.2s; }
+.saveBtn:hover { box-shadow:0 4px 20px rgba(199,125,255,0.35); }
+.saveBtnSaved { background:#06ffa5;color:#0a0e17; }

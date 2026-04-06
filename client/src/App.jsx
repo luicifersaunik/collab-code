@@ -11,7 +11,6 @@ export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
-    // Handle GitHub OAuth callback (/auth/callback?token=...&username=...&avatar=...)
     if (window.location.pathname === "/auth/callback") {
       const params = new URLSearchParams(window.location.search);
       const token = params.get("token");
@@ -37,9 +36,7 @@ export default function App() {
         .then(data => { if (data.username) setAuth({ token, username: data.username, avatar }); else localStorage.clear(); })
         .catch(() => {})
         .finally(() => setAuthChecked(true));
-    } else {
-      setAuthChecked(true);
-    }
+    } else { setAuthChecked(true); }
 
     const params = new URLSearchParams(window.location.search);
     const roomFromUrl = params.get("room");
@@ -48,8 +45,8 @@ export default function App() {
 
   const handleAuth = (authData) => setAuth(authData);
 
-  const handleJoin = ({ roomId }) => {
-    setSession({ roomId });
+  const handleJoin = ({ roomId, mode = "personal", role = "participant" }) => {
+    setSession({ roomId, mode, role });
     const url = new URL(window.location);
     url.searchParams.set("room", roomId);
     window.history.pushState({}, "", url);
@@ -82,10 +79,8 @@ export default function App() {
   if (!session || session.fromUrl) return (
     <Landing
       prefilledRoom={session?.fromUrl ? session.roomId : ""}
-      username={auth.username}
-      avatar={auth.avatar}
-      onJoin={handleJoin}
-      onLogout={handleLogout}
+      username={auth.username} avatar={auth.avatar}
+      onJoin={handleJoin} onLogout={handleLogout}
     />
   );
 
@@ -95,6 +90,8 @@ export default function App() {
       username={auth.username}
       token={auth.token}
       avatar={auth.avatar}
+      mode={session.mode || "personal"}
+      role={session.role || "participant"}
       onLeave={handleLeave}
       onLogout={handleLogout}
     />

@@ -141,7 +141,7 @@ app.post("/api/room/create", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-//  AI ASSIST — Personal mode only
+//  AI ASSIST — Groq (free tier) — Personal mode only
 // ═══════════════════════════════════════════════════════════════════
 
 app.post("/api/ai-assist", async (req, res) => {
@@ -154,59 +154,43 @@ app.post("/api/ai-assist", async (req, res) => {
     return res.status(403).json({ error: "AI assistant is disabled in interview mode." });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;
-  if (!apiKey) return res.status(503).json({ error: "AI service not configured. Add ANTHROPIC_API_KEY to environment variables." });
+  if (!process.env.GROQ_API_KEY) {
+    return res.status(503).json({ error: "AI service not configured. Add GROQ_API_KEY to Railway environment variables." });
+  }
 
   try {
-    // Use Anthropic Claude
-    if (process.env.ANTHROPIC_API_KEY) {
-      const response = await axios.post(
-        "https://api.anthropic.com/v1/messages",
-        {
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 1024,
-          system: `You are an expert coding assistant inside CollabCode, a real-time collaborative editor. 
-Be concise and practical. Format code with proper markdown code blocks.
-Current language: ${language || "javascript"}`,
-          messages: [
-            {
-              role: "user",
-              content: code
-                ? `Here is the current code:\n\`\`\`${language}\n${code}\n\`\`\`\n\n${prompt}`
-                : prompt,
-            },
-          ],
-        },
-        {
-          headers: {
-            "x-api-key": process.env.ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-          },
-          timeout: 30000,
-        }
-      );
-      return res.json({ reply: response.data.content[0].text });
-    }
-
-    // Fallback: OpenAI
     const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
+      "https://api.groq.com/openai/v1/chat/completions",
       {
-        model: "gpt-4o-mini",
+        model: "llama3-8b-8192",
         max_tokens: 1024,
         messages: [
-          { role: "system", content: `You are an expert coding assistant. Current language: ${language}. Be concise.` },
-          { role: "user", content: code ? `Code:\n\`\`\`${language}\n${code}\n\`\`\`\n\n${prompt}` : prompt },
+          {
+            role: "system",
+            content: `You are an expert coding assistant inside CollabCode, a real-time collaborative editor.
+Be concise and practical. Always format code with proper markdown code blocks using the correct language identifier.
+Current language: ${language || "javascript"}`,
+          },
+          {
+            role: "user",
+            content: code
+              ? `Here is the current code:\n\`\`\`${language}\n${code}\n\`\`\`\n\n${prompt}`
+              : prompt,
+          },
         ],
       },
-      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, timeout: 30000 }
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 30000,
+      }
     );
     return res.json({ reply: response.data.choices[0].message.content });
-
   } catch (err) {
-    console.error("AI error:", err.message);
-    res.status(502).json({ error: "AI service unavailable. Try again." });
+    console.error("Groq error:", err.response?.data || err.message);
+    res.status(502).json({ error: "AI service unavailable. Try again in a moment." });
   }
 });
 

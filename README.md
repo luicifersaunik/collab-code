@@ -1,9 +1,9 @@
-# CollabCode v4 🚀
+# CollabCode  
 
-A production-grade real-time collaborative code editor with dual-mode support — **Personal** (AI-assisted coding) and **Interview** (structured technical interviews).
+A real-time collaborative code editor with dual-mode support — **Personal** (AI-assisted coding) and **Interview** (structured technical interviews).
 
 🔗 **Live Demo:** [collab-code-s8vw.vercel.app](https://collab-code-s8vw.vercel.app)
-📦 **Repo:** [github.com/luicifersaunik/collab-code](https://github.com/luicifersaunik/collab-code)
+
 
 ---
 
@@ -157,19 +157,7 @@ Each file in a room has its own `Y.Doc`. Edits are encoded as binary updates and
 | Frontend | Vercel | Root dir: `client`, Framework: Vite |
 | Backend | Railway | Root dir: `server`, Start: `node server.js` |
 
-### Environment variables — Railway
-```
-NODE_ENV=production
-PORT=3001
-JWT_SECRET=...
-SESSION_SECRET=...
-GROQ_API_KEY=...
-JUDGE0_URL=https://ce.judge0.com
-BACKEND_URL=https://your-railway-url.up.railway.app
-FRONTEND_URL=https://your-vercel-url.vercel.app
-GITHUB_CLIENT_ID=...
-GITHUB_CLIENT_SECRET=...
-```
+
 
 ### Environment variables — Vercel
 ```
